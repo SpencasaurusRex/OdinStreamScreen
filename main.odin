@@ -38,7 +38,7 @@ Particle :: struct {
     index: int,
     position: V3,
     offset: f32,
-    vx, vy: f32
+    velocity: V3
 };
 
 main :: proc() {
@@ -48,7 +48,8 @@ main :: proc() {
         return;
     }
 
-    fmt.println("Loading file");
+    scaling :: 1.25;
+    particle_mult :: 2;
 
     width, height, channels: i32;
     raw_image_data := stbi.loadf("BalancedCircle.png", &width, &height, &channels, 4);
@@ -83,13 +84,15 @@ main :: proc() {
                     append(&configuration_1, p);
                 }
 
-                append(&vertices, V3{ gl_x,      gl_y     , 0 });
-                append(&vertices, V3{ gl_x + dx, gl_y     , 0 });
-                append(&vertices, V3{ gl_x + dx, gl_y + dy, 0 });
+                for j in 1..particle_mult {
+                    append(&vertices, V3{ gl_x,                gl_y               , 0 });
+                    append(&vertices, V3{ gl_x + dx * scaling, gl_y               , 0 });
+                    append(&vertices, V3{ gl_x + dx * scaling, gl_y + dy * scaling, 0 });
 
-                append(&vertices, V3{ gl_x + dx, gl_y + dy, 0 });
-                append(&vertices, V3{ gl_x     , gl_y + dy, 0 });
-                append(&vertices, V3{ gl_x     , gl_y     , 0 });
+                    append(&vertices, V3{ gl_x + dx * scaling, gl_y + dy * scaling, 0 });
+                    append(&vertices, V3{ gl_x               , gl_y + dy * scaling, 0 });
+                    append(&vertices, V3{ gl_x               , gl_y               , 0 });
+                }
 
                 particle_count += 1;
             }
@@ -99,23 +102,27 @@ main :: proc() {
     slice.sort_by(configuration_0[:], proc(i, j: Polar) -> bool {return i.r < j.r});
     slice.sort_by(configuration_1[:], proc(i, j: Polar) -> bool {return i.r < j.r});
 
-    particles := make([]Particle, particle_count);
+    particles := make([]Particle, particle_count * particle_mult);
     p := 0;
 
     a := 0;
     for i in 0..<len(configuration_0) {
-        c := configuration_0[i];
-        particles[p].position = polar_to_cartesian(c.r, c.d);
-        particles[p].index = i;
-        particles[p].configuration = 0;
-        p += 1;
+        for j in 1..particle_mult {
+            c := configuration_0[i];
+            particles[p].position = polar_to_cartesian(c.r, c.d);
+            particles[p].index = i;
+            particles[p].configuration = 0;
+            p += 1;
+        }
     }
     for i in 0..<len(configuration_1) {
-        c := configuration_1[i];
-        particles[p].position = polar_to_cartesian(c.r, c.d);
-        particles[p].index = i;
-        particles[p].configuration = 1;
-        p += 1;
+        for j in 1..particle_mult {
+            c := configuration_1[i];
+            particles[p].position = polar_to_cartesian(c.r, c.d);
+            particles[p].index = i;
+            particles[p].configuration = 1;
+            p += 1;
+        }
     }
 
     window := create_window(int(width * 2), int(height * 2), "Sandbox", nil, nil);
@@ -129,7 +136,6 @@ main :: proc() {
     glfw.set_framebuffer_size_callback(window, size_callback);
 
     gl.load_up_to(4, 5, proc(p: rawptr, name: cstring) do (cast(^rawptr)p)^ = get_proc_address(name) );
-    fmt.printf("Loaded OpenGL %d.%d\n", gl.loaded_up_to_major, gl.loaded_up_to_minor);
    
     shader_program,ok := gl.load_shaders_file("vertex.glsl", "fragment.glsl");
 
@@ -169,6 +175,7 @@ main :: proc() {
                 c = configuration_0[index];
                 r = particles[i].offset + c.r;
                 if r > math.PI {
+                    particles[i].velocity += rand_unit_circle() * .005;
                     particles[i].configuration = 1;
                     particles[i].offset += math.PI;
                     for particles[i].offset > 0 {
@@ -181,6 +188,7 @@ main :: proc() {
                 c = configuration_1[index];
                 r = particles[i].offset + c.r;
                 if r > 0 {
+                    particles[i].velocity += rand_unit_circle() * .005;
                     particles[i].configuration = 0;
                     particles[i].offset += math.PI;
                     for particles[i].offset > math.PI {
@@ -191,26 +199,33 @@ main :: proc() {
 
             target_position := polar_to_cartesian(r, c.d);
             target_position.x /= aspect;
-            particles[i].position = lerp(particles[i].position, target_position, .05);
-            // particles[i].position.x = particles[i].position.x;
+            
+            particles[i].velocity += (target_position - particles[i].position) * .005;
+            particles[i].velocity *= 0.95; // Damping
+            particles[i].position += particles[i].velocity;
 
-            vertices[i*6+0].x = particles[i].position.x;
-            vertices[i*6+0].y = particles[i].position.y;
+            x := particles[i].position.x;
+            xdx := x + dx * scaling;
+            y := particles[i].position.y;
+            ydy := y + dy * scaling;
+
+            vertices[i*6+0].x = x;
+            vertices[i*6+0].y = y;
             
-            vertices[i*6+1].x = particles[i].position.x + dx;
-            vertices[i*6+1].y = particles[i].position.y;
+            vertices[i*6+1].x = xdx;
+            vertices[i*6+1].y = y;
             
-            vertices[i*6+2].x = particles[i].position.x + dx;
-            vertices[i*6+2].y = particles[i].position.y + dy;
+            vertices[i*6+2].x = xdx;
+            vertices[i*6+2].y = ydy;
             
-            vertices[i*6+3].x = particles[i].position.x + dx;
-            vertices[i*6+3].y = particles[i].position.y + dy;
+            vertices[i*6+3].x = xdx;
+            vertices[i*6+3].y = ydy;
             
-            vertices[i*6+4].x = particles[i].position.x;
-            vertices[i*6+4].y = particles[i].position.y + dy;
+            vertices[i*6+4].x = x;
+            vertices[i*6+4].y = ydy;
             
-            vertices[i*6+5].x = particles[i].position.x;
-            vertices[i*6+5].y = particles[i].position.y;
+            vertices[i*6+5].x = x;
+            vertices[i*6+5].y = y;
         }
 
         swap_buffers(window);
@@ -244,9 +259,9 @@ remap :: inline proc(from_a: f32, from_b: f32, to_a: f32, to_b: f32, val: f32) -
     return lerp(to_a, to_b, inverse_lerp(from_a, from_b, val));
 }
 
-rand_unit_circle :: proc() -> (f32, f32) {
+rand_unit_circle :: proc() -> V3 {
     theta := rand.float32_range(0, math.TAU);
-    return math.cos_f32(theta), math.sin_f32(theta);
+    return V3{math.cos_f32(theta), math.sin_f32(theta), 0};
 }
 
 polar_to_cartesian :: proc(r, d: f32) -> V3 {
