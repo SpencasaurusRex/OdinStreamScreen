@@ -33,15 +33,12 @@ Polar :: struct {
     r, d: f32
 };
 
-Anchor :: struct {
-    index: int,
-    offset: f32,
-    configuration: int
-};
-
 Particle :: struct {
+    configuration: int,
     index: int,
     position: V3,
+    offset: f32,
+    vx, vy: f32
 };
 
 main :: proc() {
@@ -61,6 +58,7 @@ main :: proc() {
 
     vertices := make([dynamic]V3);
 
+    aspect := f32(width) / f32(height);
     dx :=  2.0 / f32(width);
     dy :=  2.0 / f32(height);
 
@@ -72,7 +70,7 @@ main :: proc() {
         for x in 0..<width {
             pixel := image_data[y * width + x];
             if pixel.r + pixel.g + pixel.b > 0.19 {
-                gl_x := dx * f32(x) - 1;
+                gl_x := (dx * f32(x) - 1) * aspect;
                 gl_y := 1 - dy * f32(y);
 
                 d := math.sqrt(gl_x * gl_x + gl_y * gl_y);
@@ -104,26 +102,21 @@ main :: proc() {
     particles := make([]Particle, particle_count);
     p := 0;
 
-    anchors := make([]Anchor, particle_count);
     a := 0;
     for i in 0..<len(configuration_0) {
-        anchors[a] = Anchor{i, 0, 0 };
         c := configuration_0[i];
         particles[p].position = polar_to_cartesian(c.r, c.d);
-        particles[p].index = p;
+        particles[p].index = i;
+        particles[p].configuration = 0;
         p += 1;
-        a += 1;
     }
     for i in 0..<len(configuration_1) {
-        anchors[a] = Anchor{i, 0, 1 };
         c := configuration_1[i];
         particles[p].position = polar_to_cartesian(c.r, c.d);
-        particles[p].index = p;
+        particles[p].index = i;
+        particles[p].configuration = 1;
         p += 1;
-        a += 1;
     }
-
-    // When swapping configurations we need to add 180 degrees
 
     window := create_window(int(width * 2), int(height * 2), "Sandbox", nil, nil);
     if window == nil {
@@ -142,6 +135,7 @@ main :: proc() {
 
     vbo: u32;
     gl.GenBuffers(1, &vbo);
+    offset: f32 = 0;
 
     for running && !window_should_close(window) {
         if key_pressed {
@@ -165,89 +159,59 @@ main :: proc() {
         gl.BindBuffer(gl.ARRAY_BUFFER, 0);
 
         delta: f32 = .005;
-        // Move the anchors, check if they have crossed the threshold
-        for i in 0..<len(anchors) {
-            anchor := anchors[i];
-            anchor.offset += delta;
-            if anchor.configuration == 0 {
-                index := min(len(configuration_0) - 1, anchor.index);
-                config := configuration_0[index];
-                total := config.r + anchor.offset;
-                if total > math.PI {
-                    anchor.configuration = 1;
-                    anchor.offset += math.PI;
-                    for anchor.offset > 0 {
-                        anchor.offset -= math.TAU;
-                    }
-                }
-            }
-            else {
-                index := min(len(configuration_1) - 1, anchor.index);
-                config := configuration_1[index];
-                total := config.r + anchor.offset;
-                if total > 0 {
-                    anchor.configuration = 0;
-                    anchor.offset += math.PI;
-                    for anchor.offset > math.PI {
-                        anchor.offset -= math.TAU;
-                    }
-                }
-            }
 
-            anchors[i] = anchor;
-        }
-
-        // Have particles track the anchors
         for i in 0..<len(particles) {
-            particle := particles[i];
-            anchor := anchors[particle.index];
+            particles[i].offset += delta;
             c: Polar;
-            if anchor.configuration == 0 {
-                index := min(len(configuration_0) - 1, anchor.index);
+            r: f32;
+            if particles[i].configuration == 0 {
+                index := min(len(configuration_0) - 1, particles[i].index);
                 c = configuration_0[index];
+                r = particles[i].offset + c.r;
+                if r > math.PI {
+                    particles[i].configuration = 1;
+                    particles[i].offset += math.PI;
+                    for particles[i].offset > 0 {
+                        particles[i].offset -= math.TAU;
+                    }
+                }
             }
             else {
-                index := min(len(configuration_1) - 1, anchor.index);
+                index := min(len(configuration_1) - 1, particles[i].index);
                 c = configuration_1[index];
+                r = particles[i].offset + c.r;
+                if r > 0 {
+                    particles[i].configuration = 0;
+                    particles[i].offset += math.PI;
+                    for particles[i].offset > math.PI {
+                        particles[i].offset -= math.TAU;
+                    }
+                }
             }
 
-            r := anchor.offset + c.r;
-    
             target_position := polar_to_cartesian(r, c.d);
-            particle.position = lerp(particle.position, target_position, 1);
+            target_position.x /= aspect;
+            particles[i].position = lerp(particles[i].position, target_position, .05);
+            // particles[i].position.x = particles[i].position.x;
 
-            vertices[i*6+0].x = particle.position.x;
-            vertices[i*6+0].y = particle.position.y;
+            vertices[i*6+0].x = particles[i].position.x;
+            vertices[i*6+0].y = particles[i].position.y;
             
-            vertices[i*6+1].x = particle.position.x + dx;
-            vertices[i*6+1].y = particle.position.y;
+            vertices[i*6+1].x = particles[i].position.x + dx;
+            vertices[i*6+1].y = particles[i].position.y;
             
-            vertices[i*6+2].x = particle.position.x + dx;
-            vertices[i*6+2].y = particle.position.y + dy;
+            vertices[i*6+2].x = particles[i].position.x + dx;
+            vertices[i*6+2].y = particles[i].position.y + dy;
             
-            vertices[i*6+3].x = particle.position.x + dx;
-            vertices[i*6+3].y = particle.position.y + dy;
+            vertices[i*6+3].x = particles[i].position.x + dx;
+            vertices[i*6+3].y = particles[i].position.y + dy;
             
-            vertices[i*6+4].x = particle.position.x;
-            vertices[i*6+4].y = particle.position.y + dy;
+            vertices[i*6+4].x = particles[i].position.x;
+            vertices[i*6+4].y = particles[i].position.y + dy;
             
-            vertices[i*6+5].x = particle.position.x;
-            vertices[i*6+5].y = particle.position.y;
+            vertices[i*6+5].x = particles[i].position.x;
+            vertices[i*6+5].y = particles[i].position.y;
         }
-
-        // i := 0;
-        // for i < len(vertices) {
-        //     v := vertices[i];
-        //     x := remap(-1, 1, 0, f32(width) , v.x);
-        //     y := remap(-1, 1, 0, f32(height), v.y);
-
-        //     for j in 0..<6 {
-        //         vertices[i+j].x += fx / 1000;
-        //         vertices[i+j].y += fy / 1000;
-        //     }
-
-        //     i += 6;
-        // }
 
         swap_buffers(window);
         poll_events();
